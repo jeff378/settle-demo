@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>정산 차액 분석기 — 데모</title>
+<meta name="description" content="플랫폼 정산 명세서와 내부 매출 기록을 대조해 차액 원인을 자동으로 찾아 분류합니다. 브라우저 안에서만 처리되며 서버 전송이 없습니다.">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" as="style" crossorigin
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧮</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#fbfaf8; --surface:#fff; --surface-2:#f4f2ee; --surface-3:#eceae4; --line:#e3ded6;
+  --text:#1a1815; --dim:#6d665b; --mute:#968e82;
+  --accent:#8a5527; --accent-soft:#f6efe5;
+  --amber:#a8611a; --amber-bg:#fbf1e3; --amber-line:#e6c69a;
+  --green:#2f6b45; --green-bg:#e9f3ec; --green-line:#a9cdb7;
+  --red:#a33a30; --red-bg:#faeceb;
+  --blue:#2f5680; --blue-bg:#eaf1f8;
+  --shadow:0 1px 2px rgba(26,24,21,.04), 0 6px 20px rgba(26,24,21,.05);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#131210; --surface:#1c1a17; --surface-2:#252220; --surface-3:#2e2a26; --line:#38322b;
+    --text:#efeae1; --dim:#9d9488; --mute:#7a7267;
+    --accent:#d99e63; --accent-soft:#28211a;
+    --amber:#e0a35f; --amber-bg:#2b2117; --amber-line:#5c4527;
+    --green:#7fc396; --green-bg:#1a2a20; --green-line:#2f5a3c;
+    --red:#e88b80; --red-bg:#2c1b19;
+    --blue:#8fb6dd; --blue-bg:#1a222c;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Malgun Gothic","맑은 고딕",system-ui,sans-serif;
+  font-size:16px; line-height:1.7; word-break:keep-all; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1120px; margin:0 auto; padding:0 20px}
+h1,h2,h3{letter-spacing:-.02em; margin:0}
+button{font-family:inherit; cursor:pointer}
+.num{font-variant-numeric:tabular-nums}
+
+/* ---- header ---- */
+header{background:var(--surface); border-bottom:1px solid var(--line); padding:26px 0}
+header .row{display:flex; align-items:flex-start; justify-content:space-between; gap:18px; flex-wrap:wrap}
+header h1{font-size:1.45rem; font-weight:800}
+header .sub{color:var(--dim); font-size:.9rem; margin-top:6px; max-width:60ch}
+.badges{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+.badge{font-size:.75rem; font-weight:800; padding:5px 12px; border-radius:999px; white-space:nowrap}
+.badge.demo{background:var(--amber-bg); color:var(--amber); border:1px solid var(--amber-line)}
+.badge.safe{background:var(--green-bg); color:var(--green); border:1px solid var(--green-line)}
+
+/* ---- sticky virtual-data bar ---- */
+#virtualBar{position:sticky; top:0; z-index:60; background:var(--amber); color:#fff;
+  text-align:center; font-size:.82rem; font-weight:800; padding:7px 12px; letter-spacing:.02em; display:none}
+@media (prefers-color-scheme:dark){ #virtualBar{color:#1a1512} }
+
+section{padding:34px 0}
+.card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:22px; box-shadow:var(--shadow)}
+
+/* ---- upload ---- */
+.uploads{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px}
+.drop{background:var(--surface); border:2px dashed var(--line); border-radius:14px; padding:26px 20px;
+  text-align:center; transition:border-color .15s, background .15s; cursor:pointer}
+.drop:hover,.drop.over{border-color:var(--accent); background:var(--accent-soft)}
+.drop.filled{border-style:solid; border-color:var(--green-line); background:var(--green-bg)}
+.drop .ic{font-size:1.7rem; line-height:1}
+.drop .t{font-weight:800; margin-top:8px; font-size:1rem}
+.drop .d{color:var(--dim); font-size:.85rem; margin-top:4px}
+.drop .f{color:var(--green); font-weight:700; font-size:.85rem; margin-top:8px; word-break:break-all}
+.drop input{display:none}
+
+.actions{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:18px}
+.btn{border:1px solid var(--line); background:var(--surface); color:var(--text);
+  font-weight:700; padding:12px 22px; border-radius:10px; font-size:.94rem; transition:filter .12s, transform .12s}
+.btn:hover:not(:disabled){filter:brightness(.97); transform:translateY(-1px)}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.btn.primary{background:var(--accent); color:#fff; border-color:var(--accent)}
+.btn.ghost{background:transparent}
+@media (prefers-color-scheme:dark){ .btn.primary{color:#17140f} }
+
+.period{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:16px; font-size:.88rem; color:var(--dim)}
+.period input{font-family:inherit; font-size:.88rem; padding:7px 10px; border:1px solid var(--line);
+  border-radius:8px; background:var(--surface); color:var(--text)}
+
+/* ---- summary ---- */
+.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:20px}
+.kpi{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:var(--shadow)}
+.kpi .l{font-size:.78rem; color:var(--dim); font-weight:700}
+.kpi .v{font-size:1.55rem; font-weight:800; letter-spacing:-.03em; margin-top:6px; line-height:1.2}
+.kpi .s{font-size:.76rem; color:var(--mute); margin-top:3px}
+.kpi.hi{border-color:var(--green); border-width:2px}
+.kpi.hi .v{color:var(--green)}
+.kpi.warn{border-color:var(--amber); border-width:2px}
+.kpi.warn .v{color:var(--amber)}
+
+/* ---- cause list ---- */
+.causes{display:grid; grid-template-columns:repeat(auto-fit,minmax(268px,1fr)); gap:12px}
+.cause{border:1px solid var(--line); border-left-width:5px; border-radius:11px; padding:14px 16px; background:var(--surface)}
+.cause.a{border-left-color:var(--amber)}
+.cause.g{border-left-color:var(--green)}
+.cause .h{display:flex; justify-content:space-between; align-items:baseline; gap:10px}
+.cause .n{font-weight:800; font-size:.96rem}
+.cause.a .n{color:var(--amber)} .cause.g .n{color:var(--green)}
+.cause .amt{font-weight:800; font-size:.95rem}
+.cause .cnt{font-size:.78rem; color:var(--mute); margin-top:2px}
+.cause .desc{font-size:.83rem; color:var(--dim); margin-top:6px; line-height:1.6}
+
+.legend{display:flex; gap:18px; flex-wrap:wrap; font-size:.84rem; color:var(--dim); margin:6px 0 14px}
+.legend b.a{color:var(--amber)} .legend b.g{color:var(--green)}
+
+/* ---- tabs & table ---- */
+.tabs{display:flex; gap:6px; flex-wrap:wrap; margin:22px 0 0}
+.tab{border:1px solid var(--line); background:var(--surface); color:var(--dim);
+  padding:8px 15px; border-radius:9px; font-size:.86rem; font-weight:700}
+.tab.on{background:var(--accent); color:#fff; border-color:var(--accent)}
+@media (prefers-color-scheme:dark){ .tab.on{color:#17140f} }
+.tab .c{opacity:.7; font-size:.8em; margin-left:4px}
+
+.tblwrap{overflow-x:auto; border:1px solid var(--line); border-radius:12px; background:var(--surface); margin-top:12px; box-shadow:var(--shadow)}
+table{border-collapse:collapse; width:100%; font-size:.86rem; min-width:760px}
+th,td{padding:10px 13px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap}
+th{background:var(--surface-2); font-weight:800; font-size:.79rem; position:sticky; top:0}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface-2)}
+td.r,th.r{text-align:right; font-variant-numeric:tabular-nums}
+.chip{display:inline-block; font-size:.72rem; font-weight:800; padding:2px 9px; border-radius:6px; white-space:nowrap}
+.chip.ok{background:var(--green-bg); color:var(--green)}
+.chip.a{background:var(--amber-bg); color:var(--amber)}
+.chip.g{background:var(--green-bg); color:var(--green)}
+.chip.n{background:var(--surface-3); color:var(--dim)}
+.chip.stage{background:var(--blue-bg); color:var(--blue)}
+.neg{color:var(--red)} .pos{color:var(--blue)}
+
+.plat{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin-top:14px}
+.pcard{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px}
+.pcard .pn{font-weight:800; font-size:.98rem}
+.pcard .prow{display:flex; justify-content:space-between; font-size:.84rem; margin-top:7px; color:var(--dim)}
+.pcard .prow b{color:var(--text); font-variant-numeric:tabular-nums}
+.pcard .resid{margin-top:10px; padding-top:9px; border-top:1px solid var(--line); font-size:.84rem;
+  display:flex; justify-content:space-between; font-weight:800}
+
+.note{border-radius:11px; padding:15px 18px; margin:18px 0; border-left:4px solid; font-size:.9rem}
+.note.g{background:var(--green-bg); border-color:var(--green)}
+.note.a{background:var(--amber-bg); border-color:var(--amber)}
+.note.b{background:var(--blue-bg); border-color:var(--blue)}
+.note .t{font-weight:800; display:block; margin-bottom:3px}
+.note.g .t{color:var(--green)} .note.a .t{color:var(--amber)} .note.b .t{color:var(--blue)}
+
+h2.sec{font-size:1.16rem; font-weight:800; margin:30px 0 4px}
+h2.sec:first-child{margin-top:0}
+p.sec{color:var(--dim); font-size:.88rem; margin:0 0 12px}
+#results{display:none}
+footer{border-top:1px solid var(--line); padding:28px 0 56px; color:var(--mute); font-size:.83rem; margin-top:30px}
+footer a{color:var(--accent)}
+.hidden{display:none!important}
+.steps{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+.stepbox{flex:1 1 150px; background:var(--surface-2); border-radius:9px; padding:10px 12px; font-size:.8rem}
+.stepbox b{display:block; color:var(--accent); font-size:.74rem; letter-spacing:.04em}
+.stepbox .sc{font-weight:800; font-size:1.05rem; margin-top:2px}
+</style>
+</head>
+<body>
+
+<div id="virtualBar">⚠️ 가상 데이터 — 데모용으로 만들어낸 예시입니다. 실제 거래 기록이 아닙니다.</div>
+
+<header>
+  <div class="wrap row">
+    <div>
+      <h1>정산 차액 분석기 <span style="color:var(--accent)">데모</span></h1>
+      <div class="sub">플랫폼 정산 명세서와 내부 매출 기록을 대조해, <b>두 숫자가 다른 이유를 찾아 분류합니다.</b></div>
+    </div>
+    <div class="badges">
+      <span class="badge safe">🔒 브라우저 안에서만 처리 · 서버 전송 없음</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="input">
+  <h2 class="sec">자료 올리기</h2>
+  <p class="sec">엑셀(.xlsx) 또는 CSV. 파일은 <b>어디에도 업로드되지 않고</b> 이 브라우저 안에서만 읽힙니다.</p>
+
+  <div class="uploads">
+    <label class="drop" id="dropA">
+      <input type="file" id="fileA" accept=".xlsx,.xls,.csv">
+      <div class="ic">📗</div>
+      <div class="t">내부 매출 기록</div>
+      <div class="d">예약번호 · 고객명 · 체크인 · 체크아웃 · 금액 · 플랫폼</div>
+      <div class="f" id="nameA"></div>
+    </label>
+    <label class="drop" id="dropB">
+      <input type="file" id="fileB" accept=".xlsx,.xls,.csv">
+      <div class="ic">📄</div>
+      <div class="t">플랫폼 정산 명세서</div>
+      <div class="d">고객명 · 체크인 · 정산금액 · 비고 · (플랫폼)</div>
+      <div class="f" id="nameB"></div>
+    </label>
+  </div>
+
+  <div class="period">
+    <span>정산 기간</span>
+    <input type="date" id="pFrom"> ~ <input type="date" id="pTo">
+    <span style="font-size:.82rem">← 이월 판정 기준이 됩니다</span>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="btnRun" disabled>분석하기</button>
+    <button class="btn" id="btnSample">▶ 샘플로 체험하기</button>
+    <button class="btn ghost" id="btnReset">초기화</button>
+  </div>
+
+  <div class="note b" style="margin-top:20px">
+    <span class="t">이 데모에 대해</span>
+    실제 납품물은 <b>파일 하나로 실행되는 단일 HTML 프로그램</b>이라 설치도 인터넷도 필요 없습니다.
+    매칭 규칙과 원인 분류는 <b>업체마다 다르므로 상담에서 정리해 반영</b>합니다.
+    이 데모는 그 방식이 어떻게 동작하는지 보여주기 위한 것입니다.
+  </div>
+</section>
+
+<section id="results">
+  <h2 class="sec">요약</h2>
+  <div class="kpis" id="kpis"></div>
+  <div class="steps" id="stepStats"></div>
+
+  <h2 class="sec">플랫폼별</h2>
+  <div class="plat" id="platCards"></div>
+
+  <h2 class="sec">차액 원인</h2>
+  <div class="legend">
+    <span><b class="a">●</b> 확인·수정이 필요한 차이</span>
+    <span><b class="g">●</b> 정상적으로 설명되는 차이</span>
+  </div>
+  <div class="causes" id="causeList"></div>
+  <div id="residNote"></div>
+
+  <h2 class="sec">건별 대조표</h2>
+  <p class="sec">한 줄씩 어떻게 매칭됐는지, 왜 안 맞는지 확인할 수 있습니다.</p>
+  <div class="tabs" id="tabs"></div>
+  <div class="tblwrap"><table id="detail"><thead></thead><tbody></tbody></table></div>
+
+  <div class="actions" style="margin-top:20px">
+    <button class="btn primary" id="btnXlsx">📥 결과 엑셀 내려받기</button>
+    <button class="btn" id="btnCopy">📋 관리대장용 텍스트 복사</button>
+  </div>
+</section>
+
+<footer>
+  <p><b>정산 차액 분석기 데모</b> · 모든 처리는 브라우저 안에서 끝나며 어떤 데이터도 서버로 전송되지 않습니다.</p>
+  <p>화면의 플랫폼·고객명·금액은 전부 가상으로 만들어낸 예시입니다. 실제 업체나 거래와 무관합니다.</p>
+</footer>
+
+</div>
+
+<script>
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════
+   1. 가상 샘플 데이터
+   ────────────────────────────────────────────────────────────
+   원인 유형이 골고루 들어가도록 설계했습니다.
+   플랫폼명은 "플랫폼 A/B/C", 고객명은 전부 가상입니다.
+   ══════════════════════════════════════════════════════════════ */
+const SAMPLE_PERIOD = { from: "2026-08-01", to: "2026-08-31" };
+
+const SAMPLE_INTERNAL = [
+  // 플랫폼 A
+  { 예약번호:"A-1001", 고객명:"김민서", 체크인:"2026-08-02", 체크아웃:"2026-08-03", 금액:180000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1002", 고객명:"박지훈", 체크인:"2026-08-03", 체크아웃:"2026-08-05", 금액:240000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1003", 고객명:"이서연", 체크인:"2026-08-04", 체크아웃:"2026-08-05", 금액:150000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1004", 고객명:"최준호", 체크인:"2026-08-05", 체크아웃:"2026-08-06", 금액:210000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1005", 고객명:"정하윤", 체크인:"2026-08-06", 체크아웃:"2026-08-07", 금액:320000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1006", 고객명:"강도윤", 체크인:"2026-08-07", 체크아웃:"2026-08-10", 금액:450000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1007", 고객명:"윤서아", 체크인:"2026-08-09", 체크아웃:"2026-08-10", 금액:190000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1008", 고객명:"임채원", 체크인:"2026-08-10", 체크아웃:"2026-08-11", 금액:270000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1009", 고객명:"임채원", 체크인:"2026-08-10", 체크아웃:"2026-08-11", 금액:270000, 플랫폼:"플랫폼 A" },
+  { 예약번호:"A-1010", 고객명:"한지우", 체크인:"2026-08-31", 체크아웃:"2026-09-02", 금액:260000, 플랫폼:"플랫폼 A" },
+  // 플랫폼 B
+  { 예약번호:"B-2001", 고객명:"서윤아", 체크인:"2026-08-05", 체크아웃:"2026-08-06", 금액:130000, 플랫폼:"플랫폼 B" },
+  { 예약번호:"B-2002", 고객명:"노태경", 체크인:"2026-08-08", 체크아웃:"2026-08-11", 금액:390000, 플랫폼:"플랫폼 B" },
+  { 예약번호:"B-2003", 고객명:"배수진", 체크인:"2026-08-11", 체크아웃:"2026-08-12", 금액:175000, 플랫폼:"플랫폼 B" },
+  { 예약번호:"B-2004", 고객명:"문가온", 체크인:"2026-08-14", 체크아웃:"2026-08-16", 금액:260000, 플랫폼:"플랫폼 B" },
+  { 예약번호:"B-2005", 고객명:"하시우", 체크인:"2026-08-18", 체크아웃:"2026-08-19", 금액:145000, 플랫폼:"플랫폼 B" },
+  // 플랫폼 C
+  { 예약번호:"C-3001", 고객명:"권나래", 체크인:"2026-08-06", 체크아웃:"2026-08-07", 금액:155000, 플랫폼:"플랫폼 C" },
+  { 예약번호:"C-3002", 고객명:"신유겸", 체크인:"2026-08-09", 체크아웃:"2026-08-10", 금액:198000, 플랫폼:"플랫폼 C" },
+  { 예약번호:"C-3003", 고객명:"황보름", 체크인:"2026-08-15", 체크아웃:"2026-08-17", 금액:310000, 플랫폼:"플랫폼 C" },
+  { 예약번호:"C-3004", 고객명:"남지호", 체크인:"2026-08-21", 체크아웃:"2026-08-22", 금액:168000, 플랫폼:"플랫폼 C" }
+];
+
+const SAMPLE_STATEMENT = [
+  // 플랫폼 A — 이름 표기 차이·마스킹·금액불일치·연박 분할·중복·미반영
+  { 고객명:"김민서",   체크인:"2026-08-02", 정산금액:180000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"박지훈",   체크인:"2026-08-03", 정산금액:240000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"서연 이",  체크인:"2026-08-04", 정산금액:150000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"최*호",    체크인:"2026-08-05", 정산금액:210000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"정하윤",   체크인:"2026-08-06", 정산금액:288000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"강도윤",   체크인:"2026-08-07", 정산금액:150000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"강도윤",   체크인:"2026-08-08", 정산금액:150000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"강도윤",   체크인:"2026-08-09", 정산금액:150000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"임채원",   체크인:"2026-08-10", 정산금액:270000, 비고:"", 플랫폼:"플랫폼 A" },
+  { 고객명:"오세훈",   체크인:"2026-08-12", 정산금액:165000, 비고:"", 플랫폼:"플랫폼 A" },
+  // 플랫폼 B — 날짜 어긋남·금액불일치·취소수수료
+  { 고객명:"서윤아",   체크인:"2026-08-05", 정산금액:130000, 비고:"", 플랫폼:"플랫폼 B" },
+  { 고객명:"노태경",   체크인:"2026-08-08", 정산금액:390000, 비고:"", 플랫폼:"플랫폼 B" },
+  { 고객명:"배수진",   체크인:"2026-08-13", 정산금액:175000, 비고:"", 플랫폼:"플랫폼 B" },
+  { 고객명:"문가온",   체크인:"2026-08-14", 정산금액:234000, 비고:"", 플랫폼:"플랫폼 B" },
+  { 고객명:"하시우",   체크인:"2026-08-18", 정산금액:145000, 비고:"", 플랫폼:"플랫폼 B" },
+  { 고객명:"조은결",   체크인:"2026-08-20", 정산금액:30000,  비고:"취소수수료", 플랫폼:"플랫폼 B" },
+  // 플랫폼 C — 중복 표기·미반영
+  { 고객명:"권나래",       체크인:"2026-08-06", 정산금액:155000, 비고:"", 플랫폼:"플랫폼 C" },
+  { 고객명:"신유겸신유겸", 체크인:"2026-08-09", 정산금액:198000, 비고:"", 플랫폼:"플랫폼 C" },
+  { 고객명:"황보름",       체크인:"2026-08-15", 정산금액:310000, 비고:"", 플랫폼:"플랫폼 C" },
+  { 고객명:"류하람",       체크인:"2026-08-23", 정산금액:142000, 비고:"", 플랫폼:"플랫폼 C" }
+];
+
+/* ══════════════════════════════════════════════════════════════
+   2. 원인 라벨 정의
+   ══════════════════════════════════════════════════════════════ */
+const CAUSES = {
+  오기재:       { kind:"a", desc:"매칭은 됐는데 금액이 다릅니다. 어느 쪽이 맞는지 확인이 필요합니다." },
+  취소처리누락: { kind:"a", desc:"내부에는 있는데 명세서에 없습니다. 취소가 한쪽에만 반영됐을 수 있습니다." },
+  중복예약오류: { kind:"a", desc:"같은 예약이 내부에 두 번 잡혀 매출이 초과 인식됐습니다." },
+  매출미반영:   { kind:"a", desc:"명세서에는 있는데 내부에 예약이 없거나 요금 처리가 누락됐습니다." },
+  이월가능성:   { kind:"g", desc:"체크인·체크아웃이 정산 기간 경계에 걸쳐 다음 달 정산으로 넘어간 건입니다." },
+  취소수수료:   { kind:"g", desc:"숙박 매출이 아닌 항목이라 내부 매출에 없는 것이 정상입니다." },
+  폴리오통합:   { kind:"g", desc:"명세서 여러 건의 합이 내부 한 건과 정확히 일치합니다. 연박·다인실에서 발생합니다." }
+};
+const CAUSE_LABEL = {
+  오기재:"오기재", 취소처리누락:"취소처리 누락", 중복예약오류:"중복예약 오류",
+  매출미반영:"매출 미반영", 이월가능성:"이월 가능성", 취소수수료:"취소수수료", 폴리오통합:"폴리오 통합"
+};
+
+/* ══════════════════════════════════════════════════════════════
+   3. 이름 정규화 · 유사도
+   ══════════════════════════════════════════════════════════════ */
+function normName(s){
+  return String(s||"").replace(/[\s ._\-()[\]]/g,"").toUpperCase();
+}
+// "신유겸신유겸" → "신유겸"
+function dedupeRepeat(s){
+  const n=s.length;
+  for(let len=1; len<=n/2; len++){
+    if(n%len) continue;
+    const unit=s.slice(0,len);
+    if(unit.repeat(n/len)===s) return unit;
+  }
+  return s;
+}
+function levenshtein(a,b){
+  if(a===b) return 0;
+  const m=a.length, n=b.length;
+  if(!m) return n; if(!n) return m;
+  let prev=Array.from({length:n+1},(_,i)=>i), cur=new Array(n+1);
+  for(let i=1;i<=m;i++){
+    cur[0]=i;
+    for(let j=1;j<=n;j++){
+      cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+(a[i-1]===b[j-1]?0:1));
+    }
+    [prev,cur]=[cur,prev];
+  }
+  return prev[n];
+}
+// 0~1 유사도 + 어떤 규칙으로 맞췄는지
+function nameSim(a,b){
+  const A=normName(a), B=normName(b);
+  if(!A||!B) return {score:0, how:""};
+  if(A===B) return {score:1, how:"동일"};
+
+  const dA=dedupeRepeat(A), dB=dedupeRepeat(B);
+  if(dA===dB) return {score:.97, how:"중복 표기"};
+
+  // 마스킹 (*, ○, O, ●)
+  const maskRe = s => new RegExp("^"+s.replace(/[*○●Oo]/g,".").replace(/[.*+?^${}()|[\]\\]/g,m=>m==="."?".":"\\"+m)+"$");
+  if(/[*○●]/.test(A) && maskRe(A).test(B)) return {score:.95, how:"부분 마스킹"};
+  if(/[*○●]/.test(B) && maskRe(B).test(A)) return {score:.95, how:"부분 마스킹"};
+
+  // 성·이름 순서 교체 — "서연 이" ↔ "이서연"
+  const tokA=String(a||"").trim().split(/\s+/), tokB=String(b||"").trim().split(/\s+/);
+  if(tokA.length>1 && normName(tokA.slice().reverse().join(""))===B) return {score:.93, how:"성·이름 순서"};
+  if(tokB.length>1 && normName(tokB.slice().reverse().join(""))===A) return {score:.93, how:"성·이름 순서"};
+  // 한글 3글자 성/이름 분리 교체 — "서연이" ↔ "이서연"
+  if(A.length>=3 && B.length===A.length && (A.slice(1)+A[0])===B) return {score:.9, how:"성·이름 순서"};
+  if(B.length>=3 && (B.slice(1)+B[0])===A) return {score:.9, how:"성·이름 순서"};
+
+  const dist=levenshtein(dA,dB), ratio=1-dist/Math.max(dA.length,dB.length);
+  return {score:ratio, how:"유사도 "+Math.round(ratio*100)+"%"};
+}
+
+/* ══════════════════════════════════════════════════════════════
+   4. 날짜 · 금액 유틸
+   ══════════════════════════════════════════════════════════════ */
+function toDate(v){
+  if(v==null||v==="") return null;
+  if(v instanceof Date) return isNaN(v)?null:v;
+  if(typeof v==="number"){ // 엑셀 시리얼
+    const d=new Date(Date.UTC(1899,11,30+Math.floor(v)));
+    return isNaN(d)?null:d;
+  }
+  const s=String(v).trim().replace(/[./]/g,"-").replace(/\s.*$/,"");
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));
+  m=s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));
+  const d=new Date(s);
+  return isNaN(d)?null:d;
+}
+const DAY=86400000;
+function dayDiff(a,b){ return (a&&b) ? Math.round((a-b)/DAY) : null; }
+function fmtDate(d){
+  if(!d) return "";
+  const p=n=>String(n).padStart(2,"0");
+  return d.getUTCFullYear()+"-"+p(d.getUTCMonth()+1)+"-"+p(d.getUTCDate());
+}
+function toNum(v){
+  if(typeof v==="number") return v;
+  const n=parseFloat(String(v??"").replace(/[^0-9.\-]/g,""));
+  return isNaN(n)?0:n;
+}
+function won(n){
+  const s=Math.abs(Math.round(n)).toLocaleString("ko-KR");
+  return (n<0?"−":"")+s+"원";
+}
+function wonSigned(n){
+  if(n===0) return "0원";
+  const s=Math.abs(Math.round(n)).toLocaleString("ko-KR");
+  return (n<0?"−":"+")+s+"원";
+}
+function esc(s){ return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ══════════════════════════════════════════════════════════════
+   5. 파일 파싱 · 열 자동 인식
+   ══════════════════════════════════════════════════════════════ */
+const FIELD_KEYS = {
+  예약번호:["예약번호","예약no","예약 번호","booking","reservation","주문번호","확인번호"],
+  고객명:  ["고객명","성명","이름","투숙객","예약자","guest","name","구매자"],
+  체크인:  ["체크인","입실","입실일","시작일","checkin","check-in","도착","이용일","숙박일"],
+  체크아웃:["체크아웃","퇴실","퇴실일","종료일","checkout","check-out","출발"],
+  금액:    ["금액","객실료","매출","판매가","숙박료","총액","결제금액","공급가"],
+  정산금액:["정산금액","정산액","지급액","입금액","정산","지급","금액","payout"],
+  비고:    ["비고","메모","항목","구분","note","remark","적요"],
+  플랫폼:  ["플랫폼","채널","ota","경로","판매처","마켓","사이트"]
+};
+function pickCol(headers, field){
+  const keys=FIELD_KEYS[field]||[];
+  const norm=headers.map(h=>String(h||"").replace(/\s/g,"").toLowerCase());
+  for(const k of keys){
+    const kk=k.replace(/\s/g,"").toLowerCase();
+    const i=norm.findIndex(h=>h===kk);
+    if(i>=0) return i;
+  }
+  for(const k of keys){
+    const kk=k.replace(/\s/g,"").toLowerCase();
+    const i=norm.findIndex(h=>h.includes(kk));
+    if(i>=0) return i;
+  }
+  return -1;
+}
+function sheetToRows(ab){
+  const wb=XLSX.read(ab,{type:"array"});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""});
+  // 헤더 행 찾기 — 비지 않은 셀이 가장 많은 첫 5행 중 하나
+  let hi=0, best=-1;
+  for(let i=0;i<Math.min(5,aoa.length);i++){
+    const c=(aoa[i]||[]).filter(x=>String(x||"").trim()!=="").length;
+    if(c>best){best=c; hi=i;}
+  }
+  return { headers:(aoa[hi]||[]).map(x=>String(x||"").trim()), body:aoa.slice(hi+1).filter(r=>r.some(x=>String(x||"").trim()!=="")) };
+}
+function mapInternal(parsed){
+  const h=parsed.headers;
+  const c={ 예약번호:pickCol(h,"예약번호"), 고객명:pickCol(h,"고객명"), 체크인:pickCol(h,"체크인"),
+            체크아웃:pickCol(h,"체크아웃"), 금액:pickCol(h,"금액"), 플랫폼:pickCol(h,"플랫폼") };
+  if(c.고객명<0||c.금액<0) throw new Error("내부 매출 파일에서 '고객명'과 '금액' 열을 찾지 못했습니다. 헤더 이름을 확인해 주세요.");
+  return parsed.body.map((r,i)=>({
+    예약번호: c.예약번호>=0 ? String(r[c.예약번호]||"") : "R"+(i+1),
+    고객명:   String(r[c.고객명]||""),
+    체크인:   c.체크인>=0 ? r[c.체크인] : null,
+    체크아웃: c.체크아웃>=0 ? r[c.체크아웃] : null,
+    금액:     toNum(r[c.금액]),
+    플랫폼:   c.플랫폼>=0 ? (String(r[c.플랫폼]||"").trim()||"미지정") : "미지정"
+  }));
+}
+function mapStatement(parsed){
+  const h=parsed.headers;
+  const c={ 고객명:pickCol(h,"고객명"), 체크인:pickCol(h,"체크인"),
+            정산금액:pickCol(h,"정산금액"), 비고:pickCol(h,"비고"), 플랫폼:pickCol(h,"플랫폼") };
+  if(c.고객명<0||c.정산금액<0) throw new Error("정산 명세서에서 '고객명'과 '정산금액' 열을 찾지 못했습니다. 헤더 이름을 확인해 주세요.");
+  return parsed.body.map(r=>({
+    고객명:   String(r[c.고객명]||""),
+    체크인:   c.체크인>=0 ? r[c.체크인] : null,
+    정산금액: toNum(r[c.정산금액]),
+    비고:     c.비고>=0 ? String(r[c.비고]||"") : "",
+    플랫폼:   c.플랫폼>=0 ? (String(r[c.플랫폼]||"").trim()||"미지정") : "미지정"
+  }));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   6. 매칭 엔진 — 5단계
+   ══════════════════════════════════════════════════════════════ */
+const SIM_THRESHOLD = 0.75;
+const DATE_TOLERANCE = 3; // 4단계 날짜 허용 ±일
+
+function analyze(internalRaw, statementRaw, period){
+  const inn = internalRaw.map((r,i)=>({
+    ...r, _i:i, _d:toDate(r.체크인), _out:toDate(r.체크아웃),
+    matched:false, stage:null, how:"", pairs:[], cause:null
+  }));
+  const st = statementRaw.map((r,i)=>({
+    ...r, _i:i, _d:toDate(r.체크인),
+    matched:false, stage:null, how:"", pair:null, cause:null
+  }));
+  const from=toDate(period.from), to=toDate(period.to);
+  const stageCount={1:0,2:0,3:0,4:0};
+
+  const sameP=(a,b)=> !a.플랫폼 || !b.플랫폼 || a.플랫폼==="미지정" || b.플랫폼==="미지정" || a.플랫폼===b.플랫폼;
+  // 한쪽에 날짜가 없으면 날짜 조건을 걸지 않는다 (날짜 열이 없는 파일 대응)
+  const sameDay=(a,b)=> (!a||!b) ? true : a.getTime()===b.getTime();
+
+  /* ── 1단계: 이름 + 금액 + 날짜 정확 일치 (신뢰도 최상) ── */
+  for(const I of inn){
+    if(I.matched) continue;
+    const S = st.find(s=>!s.matched && sameP(I,s)
+      && normName(s.고객명)===normName(I.고객명) && s.정산금액===I.금액 && sameDay(s._d,I._d));
+    if(S){ link(I,S,1,"이름·금액·날짜 정확"); stageCount[1]++; }
+  }
+
+  /* ── 2단계: 이름 유사도 (날짜는 같고 금액이 다를 수 있음) ── */
+  for(const I of inn){
+    if(I.matched) continue;
+    const cands = st.filter(s=>!s.matched && sameP(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
+    // 같은 이름이 여러 줄인데 그 합이 내부 금액과 맞으면 연박·다인실 분할일 가능성이 높다.
+    // 여기서 한 줄만 집어가면 3단계(그룹 합산)가 영영 발동하지 못하므로 넘긴다.
+    if(cands.length>=2 && findSubsetSum(cands, I.금액)) continue;
+    let best=null, bestScore=0, bestGap=Infinity, bestHow="";
+    for(const S of cands){
+      if(!sameDay(S._d,I._d)) continue;
+      const {score,how}=nameSim(I.고객명,S.고객명);
+      const gap=Math.abs(S.정산금액-I.금액);
+      if(score>bestScore || (score===bestScore && gap<bestGap)){
+        best=S; bestScore=score; bestGap=gap; bestHow=how;
+      }
+    }
+    if(best){ link(I,best,2, bestScore===1 ? "이름·날짜 일치" : "이름 "+bestHow); stageCount[2]++; }
+  }
+
+  /* ── 3단계: 그룹 합산 (명세서 여러 줄 = 내부 한 줄) ── */
+  for(const I of inn){
+    if(I.matched) continue;
+    const cands = st.filter(s=>!s.matched && sameP(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
+    if(cands.length<2) continue;
+    const combo = findSubsetSum(cands, I.금액);
+    if(combo){
+      I.matched=true; I.stage=3; I.how="그룹 합산 "+combo.length+"건";
+      combo.forEach(S=>{ S.matched=true; S.stage=3; S.how="그룹 합산"; S.pair=I; I.pairs.push(S); });
+      I.cause="폴리오통합";
+      stageCount[3]++;
+    }
+  }
+
+  /* ── 4단계: 날짜 허용범위 확장 ── */
+  for(const I of inn){
+    if(I.matched) continue;
+    let best=null, bestD=Infinity, bestHow="";
+    for(const S of st){
+      if(S.matched || !sameP(I,S)) continue;
+      const sim=nameSim(I.고객명,S.고객명);
+      if(sim.score<SIM_THRESHOLD) continue;
+      const dd=dayDiff(S._d,I._d);
+      if(dd===null) continue;
+      if(Math.abs(dd)<=DATE_TOLERANCE && Math.abs(dd)<bestD){
+        best=S; bestD=Math.abs(dd); bestHow="날짜 "+(dd>0?"+":"")+dd+"일 차이";
+      }
+    }
+    if(best){ link(I,best,4,bestHow); stageCount[4]++; }
+  }
+
+  function link(I,S,stage,how){
+    I.matched=true; S.matched=true; I.stage=S.stage=stage; I.how=S.how=how;
+    I.pairs=[S]; S.pair=I;
+  }
+
+  /* ── 5단계: 미매칭 분류 + 원인 라벨 ── */
+  // 매칭됐지만 금액이 다른 건
+  for(const I of inn){
+    if(!I.matched || I.stage===3) continue;
+    const sum=I.pairs.reduce((a,s)=>a+s.정산금액,0);
+    if(sum!==I.금액){ I.cause="오기재"; I.pairs.forEach(s=>s.cause="오기재"); }
+  }
+  // 내부에만 남은 건
+  const dupKey = r => normName(r.고객명)+"|"+fmtDate(r._d)+"|"+r.금액;
+  const matchedKeys = new Set(inn.filter(r=>r.matched).map(dupKey));
+  for(const I of inn){
+    if(I.matched) continue;
+    if(matchedKeys.has(dupKey(I))){ I.cause="중복예약오류"; continue; }
+    const outAfter = I._out && to && I._out > to;
+    const inNearEnd = I._d && to && dayDiff(to,I._d) <= 2 && dayDiff(to,I._d) >= 0;
+    I.cause = (outAfter||inNearEnd) ? "이월가능성" : "취소처리누락";
+  }
+  // 명세서에만 남은 건
+  for(const S of st){
+    if(S.matched) continue;
+    S.cause = /취소|수수료|위약|penalty|cancel/i.test(S.비고||"") ? "취소수수료" : "매출미반영";
+  }
+
+  /* ── 집계 ── */
+  const internalTotal = inn.reduce((a,r)=>a+r.금액,0);
+  const statementTotal = st.reduce((a,r)=>a+r.정산금액,0);
+  const gap = statementTotal - internalTotal;   // 명세서 − 내부
+
+  // 원인별 기여분 (명세서 관점 부호)
+  const causeAgg = {};
+  const bump=(k,amt)=>{ (causeAgg[k] ??= {amount:0,count:0}); causeAgg[k].amount+=amt; causeAgg[k].count++; };
+  for(const I of inn){
+    if(I.cause==="오기재"){ bump("오기재", I.pairs.reduce((a,s)=>a+s.정산금액,0) - I.금액); }
+    else if(I.cause==="중복예약오류") bump("중복예약오류", -I.금액);
+    else if(I.cause==="이월가능성")   bump("이월가능성", -I.금액);
+    else if(I.cause==="취소처리누락") bump("취소처리누락", -I.금액);
+    else if(I.cause==="폴리오통합")   bump("폴리오통합", 0);
+  }
+  for(const S of st){
+    if(S.matched) continue;
+    if(S.cause==="취소수수료") bump("취소수수료", S.정산금액);
+    else if(S.cause==="매출미반영") bump("매출미반영", S.정산금액);
+  }
+  const explained = Object.values(causeAgg).reduce((a,c)=>a+c.amount,0);
+  const residual = gap - explained;
+
+  // 플랫폼별
+  const plats={};
+  const pf = n => (plats[n] ??= {name:n, internal:0, statement:0, explained:0});
+  inn.forEach(r=>{ pf(r.플랫폼).internal += r.금액; });
+  st.forEach(r=>{ pf(r.플랫폼).statement += r.정산금액; });
+  for(const I of inn){
+    const p=pf(I.플랫폼);
+    if(I.cause==="오기재") p.explained += I.pairs.reduce((a,s)=>a+s.정산금액,0) - I.금액;
+    else if(I.cause==="중복예약오류"||I.cause==="이월가능성"||I.cause==="취소처리누락") p.explained -= I.금액;
+  }
+  for(const S of st){ if(!S.matched) pf(S.플랫폼).explained += S.정산금액; }
+  Object.values(plats).forEach(p=>{ p.gap=p.statement-p.internal; p.residual=p.gap-p.explained; });
+
+  return { inn, st, internalTotal, statementTotal, gap, explained, residual,
+           causeAgg, plats:Object.values(plats), stageCount, period };
+}
+
+// 부분집합 합이 target인 조합 찾기 (최대 6개, 안전 상한)
+function findSubsetSum(items, target){
+  const n=Math.min(items.length,12);
+  for(let size=2; size<=Math.min(6,n); size++){
+    const idx=Array.from({length:size},(_,i)=>i);
+    while(true){
+      const sum=idx.reduce((a,i)=>a+items[i].정산금액,0);
+      if(sum===target) return idx.map(i=>items[i]);
+      let p=size-1;
+      while(p>=0 && idx[p]===n-size+p) p--;
+      if(p<0) break;
+      idx[p]++;
+      for(let q=p+1;q<size;q++) idx[q]=idx[q-1]+1;
+    }
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   7. 렌더링
+   ══════════════════════════════════════════════════════════════ */
+let RESULT=null, TAB="all";
+
+function render(res){
+  RESULT=res;
+  document.getElementById("results").style.display="block";
+
+  // KPI
+  const resZero = Math.abs(res.residual) < 1;
+  document.getElementById("kpis").innerHTML = `
+    <div class="kpi"><div class="l">내부 매출 합계</div><div class="v num">${won(res.internalTotal)}</div><div class="s">${res.inn.length}건</div></div>
+    <div class="kpi"><div class="l">정산 명세서 합계</div><div class="v num">${won(res.statementTotal)}</div><div class="s">${res.st.length}건</div></div>
+    <div class="kpi warn"><div class="l">총 차액 <span style="font-weight:400">(명세서 − 내부)</span></div><div class="v num">${wonSigned(res.gap)}</div><div class="s">이 금액의 이유를 찾습니다</div></div>
+    <div class="kpi"><div class="l">설명된 금액</div><div class="v num">${wonSigned(res.explained)}</div><div class="s">원인 ${Object.keys(res.causeAgg).length}종</div></div>
+    <div class="kpi ${resZero?"hi":"warn"}"><div class="l">미설명 잔액</div><div class="v num">${won(res.residual)}</div><div class="s">${resZero?"✅ 전액 설명됨":"사람이 확인할 금액"}</div></div>`;
+
+  // 단계별 통계
+  const sc=res.stageCount;
+  const unmatchedI=res.inn.filter(r=>!r.matched).length, unmatchedS=res.st.filter(r=>!r.matched).length;
+  document.getElementById("stepStats").innerHTML = `
+    <div class="stepbox"><b>1단계</b>이름·금액·날짜 정확<div class="sc num">${sc[1]}건</div></div>
+    <div class="stepbox"><b>2단계</b>이름 유사도<div class="sc num">${sc[2]}건</div></div>
+    <div class="stepbox"><b>3단계</b>그룹 합산<div class="sc num">${sc[3]}건</div></div>
+    <div class="stepbox"><b>4단계</b>날짜 범위 확장<div class="sc num">${sc[4]}건</div></div>
+    <div class="stepbox"><b>5단계</b>미매칭 분류<div class="sc num">${unmatchedI+unmatchedS}건</div></div>`;
+
+  // 플랫폼별
+  document.getElementById("platCards").innerHTML = res.plats.map(p=>{
+    const ok=Math.abs(p.residual)<1;
+    return `<div class="pcard">
+      <div class="pn">${esc(p.name)}</div>
+      <div class="prow"><span>내부</span><b>${won(p.internal)}</b></div>
+      <div class="prow"><span>명세서</span><b>${won(p.statement)}</b></div>
+      <div class="prow"><span>차액</span><b>${wonSigned(p.gap)}</b></div>
+      <div class="resid"><span style="color:${ok?'var(--green)':'var(--amber)'}">미설명 잔액</span>
+        <span style="color:${ok?'var(--green)':'var(--amber)'}">${ok?"0원 ✅":won(p.residual)}</span></div>
+    </div>`;
+  }).join("");
+
+  // 원인 목록
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월가능성","취소수수료","폴리오통합"];
+  document.getElementById("causeList").innerHTML = order.filter(k=>res.causeAgg[k]).map(k=>{
+    const c=res.causeAgg[k], m=CAUSES[k];
+    return `<div class="cause ${m.kind}">
+      <div class="h"><span class="n">${CAUSE_LABEL[k]}</span><span class="amt num">${k==="폴리오통합"?"±0원":wonSigned(c.amount)}</span></div>
+      <div class="cnt">${c.count}건</div>
+      <div class="desc">${m.desc}</div>
+    </div>`;
+  }).join("") || `<div class="note b">분류할 차액이 없습니다. 두 자료가 완전히 일치합니다.</div>`;
+
+  document.getElementById("residNote").innerHTML = resZero
+    ? `<div class="note g"><span class="t">✅ 확정된 원인들의 합이 전체 차액과 정확히 일치합니다</span>
+        미설명 잔액이 0원입니다. 사람이 따로 확인할 건이 없습니다.
+        이 도구는 <b>"대충 맞다"에서 멈추지 않고 여기까지 밀어붙이도록</b> 설계돼 있습니다.</div>`
+    : `<div class="note a"><span class="t">미설명 잔액 ${won(res.residual)}</span>
+        원인이 확정되지 않은 금액입니다. <b>이 금액에 해당하는 건만</b> 사람이 확인하면 됩니다 —
+        전체를 다시 볼 필요가 없습니다.</div>`;
+
+  renderTabs(); renderTable();
+}
+
+function rowsFor(tab){
+  const R=RESULT, out=[];
+  const pushMatched=(I)=>{
+    const sum=I.pairs.reduce((a,s)=>a+s.정산금액,0);
+    out.push({ type: sum===I.금액?"match":"diff", plat:I.플랫폼, name:I.고객명,
+      sname:I.pairs.map(s=>s.고객명).join(", "), date:fmtDate(I._d), inAmt:I.금액, stAmt:sum,
+      diff:sum-I.금액, stage:I.stage, how:I.how, cause:I.cause });
+  };
+  for(const I of R.inn){
+    if(I.matched) pushMatched(I);
+    else out.push({ type:"onlyIn", plat:I.플랫폼, name:I.고객명, sname:"—", date:fmtDate(I._d),
+      inAmt:I.금액, stAmt:null, diff:-I.금액, stage:5, how:"미매칭", cause:I.cause });
+  }
+  for(const S of R.st){
+    if(S.matched) continue;
+    out.push({ type:"onlySt", plat:S.플랫폼, name:"—", sname:S.고객명, date:fmtDate(S._d),
+      inAmt:null, stAmt:S.정산금액, diff:S.정산금액, stage:5, how:"미매칭", cause:S.cause });
+  }
+  if(tab==="all") return out;
+  return out.filter(r=>r.type===tab);
+}
+
+function renderTabs(){
+  const defs=[["all","전체"],["match","일치"],["diff","금액 불일치"],["onlySt","명세서에만"],["onlyIn","내부에만"]];
+  document.getElementById("tabs").innerHTML = defs.map(([k,l])=>{
+    const n=rowsFor(k).length;
+    return `<button class="tab ${TAB===k?"on":""}" data-tab="${k}">${l}<span class="c">${n}</span></button>`;
+  }).join("");
+  document.querySelectorAll("#tabs .tab").forEach(b=>b.onclick=()=>{ TAB=b.dataset.tab; renderTabs(); renderTable(); });
+}
+
+function renderTable(){
+  const rows=rowsFor(TAB);
+  const t=document.getElementById("detail");
+  t.querySelector("thead").innerHTML =
+    `<tr><th>플랫폼</th><th>상태</th><th>내부 고객명</th><th>명세서 고객명</th><th>체크인</th>
+     <th class="r">내부 금액</th><th class="r">정산 금액</th><th class="r">차이</th><th>매칭</th><th>원인</th></tr>`;
+  const stateChip=r=>({
+    match:'<span class="chip ok">일치</span>', diff:'<span class="chip a">금액 불일치</span>',
+    onlySt:'<span class="chip a">명세서에만</span>', onlyIn:'<span class="chip a">내부에만</span>'
+  }[r.type]);
+  t.querySelector("tbody").innerHTML = rows.length ? rows.map(r=>`<tr>
+      <td>${esc(r.plat)}</td>
+      <td>${stateChip(r)}</td>
+      <td>${esc(r.name)}</td>
+      <td>${esc(r.sname)}</td>
+      <td class="num">${r.date}</td>
+      <td class="r">${r.inAmt==null?"—":won(r.inAmt)}</td>
+      <td class="r">${r.stAmt==null?"—":won(r.stAmt)}</td>
+      <td class="r ${r.diff<0?"neg":r.diff>0?"pos":""}">${r.diff===0?"—":wonSigned(r.diff)}</td>
+      <td><span class="chip stage">${r.stage}단계</span> <span style="color:var(--mute);font-size:.8em">${esc(r.how)}</span></td>
+      <td>${r.cause?`<span class="chip ${CAUSES[r.cause].kind}">${CAUSE_LABEL[r.cause]}</span>`:"—"}</td>
+    </tr>`).join("")
+    : `<tr><td colspan="10" style="text-align:center;color:var(--mute);padding:26px">해당하는 건이 없습니다.</td></tr>`;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   8. 내보내기
+   ══════════════════════════════════════════════════════════════ */
+function exportXlsx(){
+  const R=RESULT; if(!R) return;
+  const wb=XLSX.utils.book_new();
+
+  const s1=[["정산 차액 분석 결과"],["※ 가상 데이터 데모"],[],
+    ["분석 기간", R.period.from+" ~ "+R.period.to],
+    ["내부 매출 합계", R.internalTotal],
+    ["정산 명세서 합계", R.statementTotal],
+    ["총 차액 (명세서 − 내부)", R.gap],
+    ["설명된 금액", R.explained],
+    ["미설명 잔액", R.residual],[],
+    ["플랫폼","내부","명세서","차액","미설명 잔액"],
+    ...R.plats.map(p=>[p.name,p.internal,p.statement,p.gap,p.residual])];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s1), "요약");
+
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월가능성","취소수수료","폴리오통합"];
+  const s2=[["구분","원인","건수","금액","설명"],
+    ...order.filter(k=>R.causeAgg[k]).map(k=>[
+      CAUSES[k].kind==="a"?"확인 필요":"정상 설명", CAUSE_LABEL[k],
+      R.causeAgg[k].count, R.causeAgg[k].amount, CAUSES[k].desc])];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s2), "원인목록");
+
+  const s3=[["플랫폼","상태","내부 고객명","명세서 고객명","체크인","내부 금액","정산 금액","차이","매칭 단계","매칭 방식","원인"],
+    ...rowsFor("all").map(r=>[r.plat,
+      {match:"일치",diff:"금액 불일치",onlySt:"명세서에만",onlyIn:"내부에만"}[r.type],
+      r.name, r.sname, r.date, r.inAmt, r.stAmt, r.diff, r.stage+"단계", r.how,
+      r.cause?CAUSE_LABEL[r.cause]:""])];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s3), "건별대조표");
+
+  XLSX.writeFile(wb, "정산차액분석_"+R.period.from.replace(/-/g,"")+"_데모.xlsx");
+}
+
+function ledgerText(){
+  const R=RESULT; if(!R) return "";
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월가능성","취소수수료","폴리오통합"];
+  const L=[];
+  L.push("[정산 차액 분석] "+R.period.from+" ~ "+R.period.to+"  ※가상 데이터");
+  L.push("내부 "+won(R.internalTotal)+" / 명세서 "+won(R.statementTotal)+" / 차액 "+wonSigned(R.gap));
+  L.push("");
+  R.plats.forEach(p=>L.push(p.name+"\t"+p.internal+"\t"+p.statement+"\t"+p.gap+"\t"+p.residual));
+  L.push("");
+  order.filter(k=>R.causeAgg[k]).forEach(k=>{
+    const c=R.causeAgg[k];
+    L.push((CAUSES[k].kind==="a"?"[확인]":"[정상]")+"\t"+CAUSE_LABEL[k]+"\t"+c.count+"건\t"+c.amount);
+  });
+  L.push("");
+  L.push("미설명 잔액\t"+R.residual);
+  return L.join("\n");
+}
+
+/* ══════════════════════════════════════════════════════════════
+   9. UI 배선
+   ══════════════════════════════════════════════════════════════ */
+let dataA=null, dataB=null;
+
+function setupDrop(dropId, inputId, nameId, onLoad){
+  const drop=document.getElementById(dropId), input=document.getElementById(inputId), nm=document.getElementById(nameId);
+  const handle=async file=>{
+    if(!file) return;
+    try{
+      const buf=await file.arrayBuffer();
+      onLoad(sheetToRows(buf));
+      nm.textContent="✓ "+file.name;
+      drop.classList.add("filled");
+      document.getElementById("virtualBar").style.display="none";
+      checkReady();
+    }catch(e){ alert("파일을 읽지 못했습니다.\n"+e.message); }
+  };
+  input.addEventListener("change",e=>handle(e.target.files[0]));
+  ["dragenter","dragover"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault(); drop.classList.add("over");}));
+  ["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault(); drop.classList.remove("over");}));
+  drop.addEventListener("drop",e=>handle(e.dataTransfer.files[0]));
+}
+function checkReady(){ document.getElementById("btnRun").disabled = !(dataA&&dataB); }
+
+setupDrop("dropA","fileA","nameA",p=>{ dataA=p; });
+setupDrop("dropB","fileB","nameB",p=>{ dataB=p; });
+
+document.getElementById("btnRun").onclick=()=>{
+  try{
+    const period={ from:document.getElementById("pFrom").value, to:document.getElementById("pTo").value };
+    if(!period.from||!period.to){ alert("정산 기간을 입력해 주세요. 이월 판정 기준이 됩니다."); return; }
+    render(analyze(mapInternal(dataA), mapStatement(dataB), period));
+    document.getElementById("results").scrollIntoView({behavior:"smooth"});
+  }catch(e){ alert(e.message); }
+};
+
+document.getElementById("btnSample").onclick=()=>{
+  document.getElementById("virtualBar").style.display="block";
+  document.getElementById("pFrom").value=SAMPLE_PERIOD.from;
+  document.getElementById("pTo").value=SAMPLE_PERIOD.to;
+  document.getElementById("nameA").textContent="✓ 샘플 · 내부 매출 (가상)";
+  document.getElementById("nameB").textContent="✓ 샘플 · 정산 명세서 (가상)";
+  document.getElementById("dropA").classList.add("filled");
+  document.getElementById("dropB").classList.add("filled");
+  dataA=dataB=null; checkReady();
+  render(analyze(SAMPLE_INTERNAL, SAMPLE_STATEMENT, SAMPLE_PERIOD));
+  document.getElementById("results").scrollIntoView({behavior:"smooth"});
+};
+
+document.getElementById("btnReset").onclick=()=>{
+  dataA=dataB=null; RESULT=null; TAB="all";
+  ["nameA","nameB"].forEach(i=>document.getElementById(i).textContent="");
+  ["dropA","dropB"].forEach(i=>document.getElementById(i).classList.remove("filled"));
+  ["fileA","fileB"].forEach(i=>document.getElementById(i).value="");
+  document.getElementById("results").style.display="none";
+  document.getElementById("virtualBar").style.display="none";
+  checkReady();
+  window.scrollTo({top:0,behavior:"smooth"});
+};
+
+document.getElementById("btnXlsx").onclick=exportXlsx;
+document.getElementById("btnCopy").onclick=async()=>{
+  const t=ledgerText();
+  try{ await navigator.clipboard.writeText(t); alert("복사했습니다. 관리대장에 붙여넣으세요."); }
+  catch(e){
+    const ta=document.createElement("textarea"); ta.value=t; document.body.appendChild(ta);
+    ta.select(); document.execCommand("copy"); ta.remove(); alert("복사했습니다.");
+  }
+};
+</script>
+</body>
+</html>
