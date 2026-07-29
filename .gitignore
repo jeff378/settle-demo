@@ -4,4 +4,5 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-.vercel
+# 캡처 원본 (자르기 전 전체 페이지 이미지) — 결과물만 커밋합니다
+capture/_raw/

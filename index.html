@@ -876,7 +876,7 @@ document.getElementById("btnRun").onclick=()=>{
   }catch(e){ alert(e.message); }
 };
 
-document.getElementById("btnSample").onclick=()=>{
+function runSample(){
   document.getElementById("virtualBar").style.display="block";
   document.getElementById("pFrom").value=SAMPLE_PERIOD.from;
   document.getElementById("pTo").value=SAMPLE_PERIOD.to;
@@ -886,8 +886,14 @@ document.getElementById("btnSample").onclick=()=>{
   document.getElementById("dropB").classList.add("filled");
   dataA=dataB=null; checkReady();
   render(analyze(SAMPLE_INTERNAL, SAMPLE_STATEMENT, SAMPLE_PERIOD));
+}
+document.getElementById("btnSample").onclick=()=>{
+  runSample();
   document.getElementById("results").scrollIntoView({behavior:"smooth"});
 };
+
+// ?sample=1 로 열면 결과 화면이 바로 보입니다 — 링크 공유·화면 캡처용
+if(/[?&]sample=1/.test(location.search)) runSample();
 
 document.getElementById("btnReset").onclick=()=>{
   dataA=dataB=null; RESULT=null; TAB="all";
