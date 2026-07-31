@@ -327,13 +327,15 @@ const CAUSES = {
   취소처리누락: { kind:"a", desc:"내부에는 있는데 명세서에 없습니다. 취소가 한쪽에만 반영됐을 수 있습니다." },
   중복예약오류: { kind:"a", desc:"같은 예약이 내부에 두 번 잡혀 매출이 초과 인식됐습니다." },
   매출미반영:   { kind:"a", desc:"명세서에는 있는데 내부에 예약이 없거나 요금 처리가 누락됐습니다." },
-  이월가능성:   { kind:"g", desc:"체크인·체크아웃이 정산 기간 경계에 걸쳐 다음 달 정산으로 넘어간 건입니다." },
+  이월가능성:   { kind:"g", desc:"체크아웃이 정산 기간을 넘어가 다음 달 정산으로 넘어간 건입니다." },
+  이월확인필요: { kind:"a", desc:"체크인이 정산 기간 끝에 걸쳐 있으나 체크아웃 정보가 없어 이월인지 확정할 수 없습니다. 다음 달 명세서에 나오는지 확인해 주세요." },
   취소수수료:   { kind:"g", desc:"숙박 매출이 아닌 항목이라 내부 매출에 없는 것이 정상입니다." },
   폴리오통합:   { kind:"g", desc:"명세서 여러 건의 합이 내부 한 건과 정확히 일치합니다. 연박·다인실에서 발생합니다." }
 };
 const CAUSE_LABEL = {
   오기재:"오기재", 취소처리누락:"취소처리 누락", 중복예약오류:"중복예약 오류",
-  매출미반영:"매출 미반영", 이월가능성:"이월 가능성", 취소수수료:"취소수수료", 폴리오통합:"폴리오 통합"
+  매출미반영:"매출 미반영", 이월확인필요:"이월 확인필요",
+  이월가능성:"이월 가능성", 취소수수료:"취소수수료", 폴리오통합:"폴리오 통합"
 };
 
 /* ══════════════════════════════════════════════════════════════
@@ -588,9 +590,29 @@ function analyze(internalRaw, statementRaw, period){
 
   /* ── 5단계: 미매칭 분류 + 원인 라벨 ── */
   // 매칭됐지만 금액이 다른 건
+  // 먼저 — 같은 이름·같은 플랫폼의 미매칭 명세서 "형제"가 있으면 합산해 본다.
+  // 명세서가 여러 줄로 쪼개져 왔는데 앞 단계가 한 줄만 집어가면, 오기재 금액이 부풀고
+  // 나머지가 매출미반영으로 갈려 **한 사건이 두 건으로 보인다.** 합산 기준으로 맞춘다.
   for(const I of inn){
     if(!I.matched || I.stage===3) continue;
-    const sum=I.pairs.reduce((a,s)=>a+s.정산금액,0);
+    let sum=I.pairs.reduce((a,s)=>a+s.정산금액,0);
+    if(sum!==I.금액){
+      const sibs = st.filter(s=>!s.matched && sameP(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
+      if(sibs.length){
+        let best=null, bestGap=Math.abs(sum-I.금액);
+        const trySet=set=>{
+          const g=Math.abs(sum+set.reduce((a,s)=>a+s.정산금액,0)-I.금액);
+          if(g<bestGap){ bestGap=g; best=set; }   // 차이를 줄일 때만 흡수
+        };
+        trySet(sibs);
+        for(const s of sibs) trySet([s]);
+        if(best){
+          best.forEach(s=>{ s.matched=true; s.stage=I.stage; s.how="형제 줄 합산"; s.pair=I; I.pairs.push(s); });
+          sum=I.pairs.reduce((a,s)=>a+s.정산금액,0);
+          I.how += " + 명세서 "+I.pairs.length+"줄 합산";
+        }
+      }
+    }
     if(sum!==I.금액){ I.cause="오기재"; I.pairs.forEach(s=>s.cause="오기재"); }
   }
   // 내부에만 남은 건
@@ -599,9 +621,15 @@ function analyze(internalRaw, statementRaw, period){
   for(const I of inn){
     if(I.matched) continue;
     if(matchedKeys.has(dupKey(I))){ I.cause="중복예약오류"; continue; }
-    const outAfter = I._out && to && I._out > to;
-    const inNearEnd = I._d && to && dayDiff(to,I._d) <= 2 && dayDiff(to,I._d) >= 0;
-    I.cause = (outAfter||inNearEnd) ? "이월가능성" : "취소처리누락";
+    // 이월 판정 3등급 — 체크아웃이 있으면 반드시 그것을 따른다.
+    // 체크아웃이 기간 안인데 "체크인이 기간 끝에 걸쳤다"는 이유로 🟢이월로 넘기면
+    // 진짜 누락이 정상으로 은폐된다. 문제를 정상으로 처리하는 방향이라 더 위험하다.
+    if(I._out && to){
+      I.cause = I._out > to ? "이월가능성" : "취소처리누락";
+    } else {
+      const inNearEnd = I._d && to && dayDiff(to,I._d) <= 2 && dayDiff(to,I._d) >= 0;
+      I.cause = inNearEnd ? "이월확인필요" : "취소처리누락";   // 확정 못 하므로 🟠로 강등
+    }
   }
   // 명세서에만 남은 건
   for(const S of st){
@@ -621,6 +649,7 @@ function analyze(internalRaw, statementRaw, period){
     if(I.cause==="오기재"){ bump("오기재", I.pairs.reduce((a,s)=>a+s.정산금액,0) - I.금액); }
     else if(I.cause==="중복예약오류") bump("중복예약오류", -I.금액);
     else if(I.cause==="이월가능성")   bump("이월가능성", -I.금액);
+    else if(I.cause==="이월확인필요") bump("이월확인필요", -I.금액);
     else if(I.cause==="취소처리누락") bump("취소처리누락", -I.금액);
     else if(I.cause==="폴리오통합")   bump("폴리오통합", 0);
   }
@@ -640,7 +669,7 @@ function analyze(internalRaw, statementRaw, period){
   for(const I of inn){
     const p=pf(I.플랫폼);
     if(I.cause==="오기재") p.explained += I.pairs.reduce((a,s)=>a+s.정산금액,0) - I.금액;
-    else if(I.cause==="중복예약오류"||I.cause==="이월가능성"||I.cause==="취소처리누락") p.explained -= I.금액;
+    else if(I.cause==="중복예약오류"||I.cause==="이월가능성"||I.cause==="이월확인필요"||I.cause==="취소처리누락") p.explained -= I.금액;
   }
   for(const S of st){ if(!S.matched) pf(S.플랫폼).explained += S.정산금액; }
   Object.values(plats).forEach(p=>{ p.gap=p.statement-p.internal; p.residual=p.gap-p.explained; });
@@ -709,7 +738,7 @@ function render(res){
   }).join("");
 
   // 원인 목록
-  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월가능성","취소수수료","폴리오통합"];
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","이월가능성","취소수수료","폴리오통합"];
   document.getElementById("causeList").innerHTML = order.filter(k=>res.causeAgg[k]).map(k=>{
     const c=res.causeAgg[k], m=CAUSES[k];
     return `<div class="cause ${m.kind}">
@@ -816,7 +845,7 @@ function exportXlsx(){
     ...R.plats.map(p=>[p.name,p.internal,p.statement,p.gap,p.residual])];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s1), "요약");
 
-  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월가능성","취소수수료","폴리오통합"];
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","이월가능성","취소수수료","폴리오통합"];
   const s2=[["구분","원인","건수","금액","설명"],
     ...order.filter(k=>R.causeAgg[k]).map(k=>[
       CAUSES[k].kind==="a"?"확인 필요":"정상 설명", CAUSE_LABEL[k],
@@ -835,7 +864,7 @@ function exportXlsx(){
 
 function ledgerText(){
   const R=RESULT; if(!R) return "";
-  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월가능성","취소수수료","폴리오통합"];
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","이월가능성","취소수수료","폴리오통합"];
   const L=[];
   L.push("[정산 차액 분석] "+R.period.from+" ~ "+R.period.to+"  ※가상 데이터");
   L.push("내부 "+won(R.internalTotal)+" / 명세서 "+won(R.statementTotal)+" / 차액 "+wonSigned(R.gap));
