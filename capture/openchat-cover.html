@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>카카오톡 오픈채팅 커버 (1:1)</title>
+<link rel="stylesheet" as="style" crossorigin
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+/* 오픈채팅 커버 — 1000x1000 정사각형으로 캡처.
+   가상 데이터(금액 예시)를 쓰지 않으므로 "가상 데이터" 라벨이 필요 없습니다.
+
+   ⚠️ 안전 영역 : 오픈채팅 커버는 기기·화면에 따라 상하좌우가 잘립니다.
+   내용을 가운데 약 68%(사방 16% 여백) 안에 두어 어떻게 잘려도 글자가 살아남게 했습니다. */
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{width:100%; height:100%}
+body{
+  overflow:hidden;
+  font-family:"Pretendard Variable",Pretendard,-apple-system,"Malgun Gothic",sans-serif;
+  background:#fbfaf8; color:#1a1815;
+  display:flex; flex-direction:column; justify-content:center; align-items:center;
+  padding:0 160px;
+  text-align:center;
+}
+.kicker{font-size:30px; font-weight:800; color:#8a5527; letter-spacing:.06em; margin-bottom:16px}
+h1{font-size:64px; font-weight:800; letter-spacing:-.035em; line-height:1.24; margin-bottom:26px}
+p{font-size:26px; color:#6d665b; line-height:1.6; margin-bottom:38px}
+p b{color:#1a1815; font-weight:700}
+.chips{display:flex; gap:11px; flex-wrap:wrap; justify-content:center}
+.chip{
+  font-size:22px; font-weight:700; padding:12px 20px; border-radius:999px;
+  background:#f6efe5; color:#8a5527; border:2px solid #e8d9c4;
+}
+.chip.g{background:#e9f3ec; color:#2f6b45; border-color:#bcdcc7}
+</style>
+</head>
+<body>
+  <div class="kicker">정산차액연구소</div>
+  <h1>반복되는 업무를<br>프로그램으로</h1>
+  <p>플랫폼 정산 명세서와 내부 기록을 대조해<br><b>차액 원인을 자동으로 찾아 분류합니다</b></p>
+  <div class="chips">
+    <span class="chip">5단계 매칭</span>
+    <span class="chip">원인 자동 분류</span>
+    <span class="chip g">설치 불필요</span>
+  </div>
+</body>
+</html>

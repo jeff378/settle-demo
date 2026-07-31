@@ -6,11 +6,14 @@
 <link rel="stylesheet" as="style" crossorigin
   href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
-/* 크몽 포트폴리오 대표 이미지 — 1200x1200 (1:1)
-   헤드리스 Chrome으로 캡처합니다. capture-cover.ps1 참고 */
+/* 대표/메인 이미지 — 뷰포트 크기에 맞춰 늘어납니다.
+   포트폴리오 대표 : 1200x1200 (1:1)
+   서비스 메인     : 1304x976 (4:3, 652x488의 2배)
+   헤드리스 Chrome --window-size 로 비율을 정해 캡처합니다. */
 *{box-sizing:border-box; margin:0; padding:0}
+html,body{width:100%; height:100%}
 body{
-  width:1200px; height:1200px; overflow:hidden;
+  overflow:hidden;
   font-family:"Pretendard Variable",Pretendard,-apple-system,"Malgun Gothic",sans-serif;
   background:#fbfaf8; color:#1a1815;
   display:flex; flex-direction:column;
@@ -46,6 +49,22 @@ h1{font-size:70px; font-weight:800; letter-spacing:-.035em; line-height:1.15; ma
   background:#f6efe5; color:#8a5527; border:2px solid #e8d9c4;
 }
 .chip.g{background:#e9f3ec; color:#2f6b45; border-color:#bcdcc7}
+
+/* 가로가 넓고 세로가 짧은 비율(4:3 등)에서는 여백과 글자를 줄여 넘치지 않게 */
+@media (min-aspect-ratio: 5/4){
+  .bar{font-size:25px; padding:16px}
+  .body{padding:0 72px}
+  .kicker{font-size:27px; margin-bottom:12px}
+  h1{font-size:72px; margin-bottom:14px}
+  .sub{font-size:30px; margin-bottom:42px}
+  .flow{gap:22px; margin-bottom:40px}
+  .box{padding:28px 32px; border-radius:20px}
+  .box .l{font-size:25px; margin-bottom:9px}
+  .box .v{font-size:60px}
+  .box .n{font-size:22px; margin-top:9px}
+  .arrow{font-size:46px}
+  .chip{font-size:25px; padding:14px 26px}
+}
 </style>
 </head>
 <body>

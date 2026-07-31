@@ -683,7 +683,7 @@ function render(res){
     <div class="kpi"><div class="l">정산 명세서 합계</div><div class="v num">${won(res.statementTotal)}</div><div class="s">${res.st.length}건</div></div>
     <div class="kpi warn"><div class="l">총 차액 <span style="font-weight:400">(명세서 − 내부)</span></div><div class="v num">${wonSigned(res.gap)}</div><div class="s">이 금액의 이유를 찾습니다</div></div>
     <div class="kpi"><div class="l">설명된 금액</div><div class="v num">${wonSigned(res.explained)}</div><div class="s">원인 ${Object.keys(res.causeAgg).length}종</div></div>
-    <div class="kpi ${resZero?"hi":"warn"}"><div class="l">미설명 잔액</div><div class="v num">${won(res.residual)}</div><div class="s">${resZero?"✅ 전액 설명됨":"사람이 확인할 금액"}</div></div>`;
+    <div class="kpi ${resZero?"hi":"warn"}"><div class="l">미설명 잔액 <span style="font-weight:400">(검산)</span></div><div class="v num">${won(res.residual)}</div><div class="s">${resZero?"누락·이중계상 없음":"⚠️ 플랫폼 표기 확인"}</div></div>`;
 
   // 단계별 통계
   const sc=res.stageCount;
@@ -719,13 +719,25 @@ function render(res){
     </div>`;
   }).join("") || `<div class="note b">분류할 차액이 없습니다. 두 자료가 완전히 일치합니다.</div>`;
 
-  document.getElementById("residNote").innerHTML = resZero
-    ? `<div class="note g"><span class="t">✅ 확정된 원인들의 합이 전체 차액과 정확히 일치합니다</span>
-        미설명 잔액이 0원입니다. 사람이 따로 확인할 건이 없습니다.
-        이 도구는 <b>"대충 맞다"에서 멈추지 않고 여기까지 밀어붙이도록</b> 설계돼 있습니다.</div>`
-    : `<div class="note a"><span class="t">미설명 잔액 ${won(res.residual)}</span>
-        원인이 확정되지 않은 금액입니다. <b>이 금액에 해당하는 건만</b> 사람이 확인하면 됩니다 —
-        전체를 다시 볼 필요가 없습니다.</div>`;
+  // 🟠 확인필요 집계 — 실제로 사람이 손봐야 하는 양. 이게 품질 지표입니다.
+  const needCheck = Object.entries(res.causeAgg).filter(([k])=>CAUSES[k].kind==="a");
+  const ncCount = needCheck.reduce((a,[,v])=>a+v.count,0);
+  const ncAmount = needCheck.reduce((a,[,v])=>a+Math.abs(v.amount),0);
+  const unmatched = res.inn.filter(r=>!r.matched).length + res.st.filter(r=>!r.matched).length;
+  const totalRows = res.inn.length + res.st.length;
+  const matchRate = totalRows ? Math.round((totalRows-unmatched)/totalRows*100) : 0;
+
+  document.getElementById("residNote").innerHTML =
+    `<div class="note a"><span class="t">🟠 확인이 필요한 건 ${ncCount}건 · ${won(ncAmount)}</span>
+       이번 기간에 <b>실제로 손봐야 하는 양</b>입니다. 🟢로 분류된 건은 정당한 이유가 있어 확인만 하면 됩니다.
+       <br>자동 매칭률 <b>${matchRate}%</b> (미매칭 ${unmatched}건) —
+       이 값이 낮으면 두 자료의 이름·날짜 표기가 서로 많이 달라 자동으로 못 맞춘 건이 많다는 뜻입니다.</div>`
+    + (resZero
+      ? `<div class="note b"><span class="t">검산 — 미설명 잔액 0원</span>
+          모든 건이 빠짐없이 어느 원인엔가 귀속됐다는 <b>총량 확인</b>입니다.
+          분류가 옳다는 보증은 아니므로, 위 🟠 항목은 그대로 확인해 주세요.</div>`
+      : `<div class="note a"><span class="t">⚠️ 미설명 잔액 ${won(res.residual)}</span>
+          플랫폼 표기가 두 자료에서 다르게 들어왔을 수 있습니다. <b>플랫폼 열</b>을 확인해 주세요.</div>`);
 
   renderTabs(); renderTable();
 }
