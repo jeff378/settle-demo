@@ -785,7 +785,11 @@ function render(res){
     <div class="stepbox"><b>2단계</b>이름 유사도<div class="sc num">${sc[2]}건</div></div>
     <div class="stepbox"><b>3단계</b>그룹 합산<div class="sc num">${sc[3]}건</div></div>
     <div class="stepbox"><b>4단계</b>날짜 범위 확장<div class="sc num">${sc[4]}건</div></div>
-    <div class="stepbox"><b>5단계</b>미매칭 분류<div class="sc num">${unmatchedI+unmatchedS}건</div></div>`;
+    <div class="stepbox"><b>5단계</b>미매칭 분류<div class="sc num">${unmatchedI+unmatchedS}건</div></div>`
+    + (sc[0]===0 ? `<div class="note b" style="margin-top:10px;font-size:.88rem">
+        <b>0단계가 0건인 이유</b> — 이 샘플 명세서에는 예약번호 열이 없습니다.
+        예약번호는 <b>가장 믿을 수 있는 신호</b>라, 명세서에 그 열이 있으면 이름·날짜를 보지 않고
+        먼저 확정 매칭합니다. 없으면 1단계부터 이름·금액·날짜로 내려갑니다.</div>` : "");
 
   // 플랫폼별
   document.getElementById("platCards").innerHTML = res.plats.map(p=>{
