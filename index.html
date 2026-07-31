@@ -329,13 +329,15 @@ const CAUSES = {
   매출미반영:   { kind:"a", desc:"명세서에는 있는데 내부에 예약이 없거나 요금 처리가 누락됐습니다." },
   이월가능성:   { kind:"g", desc:"체크아웃이 정산 기간을 넘어가 다음 달 정산으로 넘어간 건입니다." },
   이월확인필요: { kind:"a", desc:"체크인이 정산 기간 끝에 걸쳐 있으나 체크아웃 정보가 없어 이월인지 확정할 수 없습니다. 다음 달 명세서에 나오는지 확인해 주세요." },
+  정산조정:     { kind:"a", desc:"플랫폼이 별 줄로 넣은 조정 항목입니다. 성격이 명세서마다 달라 자동으로 판단하지 않습니다 — 무엇에 대한 조정인지 확인해 주세요." },
   취소수수료:   { kind:"g", desc:"숙박 매출이 아닌 항목이라 내부 매출에 없는 것이 정상입니다." },
+  쿠폰차감:     { kind:"g", desc:"숙소가 부담한 할인·쿠폰이 별 줄로 온 것입니다. 내부 매출에 없는 것이 정상입니다." },
   폴리오통합:   { kind:"g", desc:"명세서 여러 건의 합이 내부 한 건과 정확히 일치합니다. 연박·다인실에서 발생합니다." }
 };
 const CAUSE_LABEL = {
   오기재:"오기재", 취소처리누락:"취소처리 누락", 중복예약오류:"중복예약 오류",
-  매출미반영:"매출 미반영", 이월확인필요:"이월 확인필요",
-  이월가능성:"이월 가능성", 취소수수료:"취소수수료", 폴리오통합:"폴리오 통합"
+  매출미반영:"매출 미반영", 이월확인필요:"이월 확인필요", 정산조정:"정산 조정",
+  이월가능성:"이월 가능성", 취소수수료:"취소수수료", 쿠폰차감:"쿠폰 차감", 폴리오통합:"폴리오 통합"
 };
 
 /* ══════════════════════════════════════════════════════════════
@@ -439,7 +441,9 @@ function esc(s){ return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&l
    5. 파일 파싱 · 열 자동 인식
    ══════════════════════════════════════════════════════════════ */
 const FIELD_KEYS = {
-  예약번호:["예약번호","예약no","예약 번호","booking","reservation","주문번호","확인번호"],
+  예약번호:["예약번호","예약no","예약 번호","booking","reservation","주문번호","확인번호",
+            "참조번호","예약코드","바우처번호","바우처","referenceno","reference","ref",
+            "bookingid","bookingno","confirmationno","itinerary"],
   고객명:  ["고객명","성명","이름","투숙객","예약자","guest","name","구매자"],
   체크인:  ["체크인","입실","입실일","시작일","checkin","check-in","도착","이용일","숙박일"],
   체크아웃:["체크아웃","퇴실","퇴실일","종료일","checkout","check-out","출발"],
@@ -491,10 +495,13 @@ function mapInternal(parsed){
 }
 function mapStatement(parsed){
   const h=parsed.headers;
-  const c={ 고객명:pickCol(h,"고객명"), 체크인:pickCol(h,"체크인"),
+  const c={ 예약번호:pickCol(h,"예약번호"), 고객명:pickCol(h,"고객명"), 체크인:pickCol(h,"체크인"),
             정산금액:pickCol(h,"정산금액"), 비고:pickCol(h,"비고"), 플랫폼:pickCol(h,"플랫폼") };
   if(c.고객명<0||c.정산금액<0) throw new Error("정산 명세서에서 '고객명'과 '정산금액' 열을 찾지 못했습니다. 헤더 이름을 확인해 주세요.");
   return parsed.body.map(r=>({
+    // 예약번호가 있으면 0단계(예약번호 일치)가 발동해 매칭 정확도가 크게 올라갑니다.
+    // 없으면 빈 문자열로 두고 이름·금액·날짜 단계로 갑니다.
+    예약번호: c.예약번호>=0 ? String(r[c.예약번호]||"").trim() : "",
     고객명:   String(r[c.고객명]||""),
     체크인:   c.체크인>=0 ? r[c.체크인] : null,
     정산금액: toNum(r[c.정산금액]),
@@ -509,26 +516,82 @@ function mapStatement(parsed){
 const SIM_THRESHOLD = 0.75;
 const DATE_TOLERANCE = 3; // 4단계 날짜 허용 ±일
 
+/* 명세서의 "특수 행" — 객실 매출이 아닌 별 줄.
+   고객마다 표기어가 달라 여기서 한 곳으로 모아 둡니다 (contract.md 3절에 등록).
+   ⚠️ 문구 포함 여부로 판정하므로 플랫폼이 표기를 바꾸면 조용히 깨집니다. 알려진 한계입니다. */
+const SPECIAL_RE = {
+  취소수수료: /취소|수수료|위약|penalty|cancel|no\s*show|노쇼/i,
+  쿠폰차감:   /쿠폰|coupon|할인|프로모|promo|제휴|voucher/i,
+  정산조정:   /조정|adjust|보전|correction|정산차이|차액보정/i
+};
+// 특수 행 성격 판정 — 매칭 후보에서 빼고 5단계에서만 분류합니다.
+function specialKind(row){
+  const t = String(row.비고||"");
+  if(!t.trim()) return null;
+  // 쿠폰·조정을 먼저 본다 — "취소 쿠폰"처럼 겹치면 더 구체적인 쪽을 택하기 위해
+  if(SPECIAL_RE.쿠폰차감.test(t))   return "쿠폰차감";
+  if(SPECIAL_RE.정산조정.test(t))   return "정산조정";
+  if(SPECIAL_RE.취소수수료.test(t)) return "취소수수료";
+  return null;
+}
+
+// 예약번호 정규화 — 공백·하이픈을 지우고 대문자화.
+// 0으로만 채워져 오거나 너무 짧은 값은 무효로 본다 (실무에서 실제로 나오는 형태).
+const rnKey = v => String(v??"").replace(/[\s\-_.\/]/g,"").toUpperCase();
+function validRn(v){
+  const k = rnKey(v);
+  return (k.length >= 4 && !/^0+$/.test(k)) ? k : "";
+}
+
 function analyze(internalRaw, statementRaw, period){
   const inn = internalRaw.map((r,i)=>({
     ...r, _i:i, _d:toDate(r.체크인), _out:toDate(r.체크아웃),
     matched:false, stage:null, how:"", pairs:[], cause:null
   }));
   const st = statementRaw.map((r,i)=>({
-    ...r, _i:i, _d:toDate(r.체크인),
+    ...r, _i:i, _d:toDate(r.체크인), _special:specialKind(r),
     matched:false, stage:null, how:"", pair:null, cause:null
   }));
   const from=toDate(period.from), to=toDate(period.to);
-  const stageCount={1:0,2:0,3:0,4:0};
+  const stageCount={0:0,1:0,2:0,3:0,4:0};
 
   const sameP=(a,b)=> !a.플랫폼 || !b.플랫폼 || a.플랫폼==="미지정" || b.플랫폼==="미지정" || a.플랫폼===b.플랫폼;
   // 한쪽에 날짜가 없으면 날짜 조건을 걸지 않는다 (날짜 열이 없는 파일 대응)
   const sameDay=(a,b)=> (!a||!b) ? true : a.getTime()===b.getTime();
+  // 매칭 후보 자격 — 특수 행(취소수수료·쿠폰·조정)은 객실 매출이 아니므로 아예 제외한다.
+  // 이걸 안 걸면 이름이 비슷한 무관한 예약을 잡아먹고 🟠오기재로 뒤집힌다.
+  const cand=(I,S)=> !S.matched && !S._special && sameP(I,S);
+
+  /* ── 0단계: 예약번호 완전 일치 (가장 믿을 수 있는 신호) ──
+     신뢰 순서는 예약번호 > 금액 > 날짜 > 이름이다. 이름은 식별자가 아니다.
+     양쪽에 유효한 예약번호가 있을 때만 발동하고, 이름·날짜·금액을 보지 않는다.
+     같은 예약번호로 명세서가 여러 줄 왔으면 합산해서 한 건으로 본다. */
+  {
+    const byRn=new Map();
+    for(const S of st){
+      if(S._special) continue;
+      const k=validRn(S.예약번호);
+      if(!k) continue;
+      if(!byRn.has(k)) byRn.set(k,[]);
+      byRn.get(k).push(S);
+    }
+    for(const I of inn){
+      if(I.matched) continue;
+      const k=validRn(I.예약번호);
+      if(!k) continue;
+      const group=byRn.get(k);
+      if(!group || !group.length || group.some(s=>s.matched)) continue;
+      I.matched=true; I.stage=0;
+      I.how="예약번호 일치" + (group.length>1 ? " ("+group.length+"줄 합산)" : "");
+      group.forEach(S=>{ S.matched=true; S.stage=0; S.how="예약번호 일치"; S.pair=I; I.pairs.push(S); });
+      stageCount[0]++;
+    }
+  }
 
   /* ── 1단계: 이름 + 금액 + 날짜 정확 일치 (신뢰도 최상) ── */
   for(const I of inn){
     if(I.matched) continue;
-    const S = st.find(s=>!s.matched && sameP(I,s)
+    const S = st.find(s=>cand(I,s)
       && normName(s.고객명)===normName(I.고객명) && s.정산금액===I.금액 && sameDay(s._d,I._d));
     if(S){ link(I,S,1,"이름·금액·날짜 정확"); stageCount[1]++; }
   }
@@ -536,7 +599,7 @@ function analyze(internalRaw, statementRaw, period){
   /* ── 2단계: 이름 유사도 (날짜는 같고 금액이 다를 수 있음) ── */
   for(const I of inn){
     if(I.matched) continue;
-    const cands = st.filter(s=>!s.matched && sameP(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
+    const cands = st.filter(s=>cand(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
     // 같은 이름이 여러 줄인데 그 합이 내부 금액과 맞으면 연박·다인실 분할일 가능성이 높다.
     // 여기서 한 줄만 집어가면 3단계(그룹 합산)가 영영 발동하지 못하므로 넘긴다.
     if(cands.length>=2 && findSubsetSum(cands, I.금액)) continue;
@@ -555,7 +618,7 @@ function analyze(internalRaw, statementRaw, period){
   /* ── 3단계: 그룹 합산 (명세서 여러 줄 = 내부 한 줄) ── */
   for(const I of inn){
     if(I.matched) continue;
-    const cands = st.filter(s=>!s.matched && sameP(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
+    const cands = st.filter(s=>cand(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
     if(cands.length<2) continue;
     const combo = findSubsetSum(cands, I.금액);
     if(combo){
@@ -571,7 +634,7 @@ function analyze(internalRaw, statementRaw, period){
     if(I.matched) continue;
     let best=null, bestD=Infinity, bestHow="";
     for(const S of st){
-      if(S.matched || !sameP(I,S)) continue;
+      if(!cand(I,S)) continue;
       const sim=nameSim(I.고객명,S.고객명);
       if(sim.score<SIM_THRESHOLD) continue;
       const dd=dayDiff(S._d,I._d);
@@ -597,7 +660,7 @@ function analyze(internalRaw, statementRaw, period){
     if(!I.matched || I.stage===3) continue;
     let sum=I.pairs.reduce((a,s)=>a+s.정산금액,0);
     if(sum!==I.금액){
-      const sibs = st.filter(s=>!s.matched && sameP(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
+      const sibs = st.filter(s=>cand(I,s) && nameSim(I.고객명,s.고객명).score>=SIM_THRESHOLD);
       if(sibs.length){
         let best=null, bestGap=Math.abs(sum-I.금액);
         const trySet=set=>{
@@ -634,7 +697,7 @@ function analyze(internalRaw, statementRaw, period){
   // 명세서에만 남은 건
   for(const S of st){
     if(S.matched) continue;
-    S.cause = /취소|수수료|위약|penalty|cancel/i.test(S.비고||"") ? "취소수수료" : "매출미반영";
+    S.cause = S._special || "매출미반영";
   }
 
   /* ── 집계 ── */
@@ -655,8 +718,7 @@ function analyze(internalRaw, statementRaw, period){
   }
   for(const S of st){
     if(S.matched) continue;
-    if(S.cause==="취소수수료") bump("취소수수료", S.정산금액);
-    else if(S.cause==="매출미반영") bump("매출미반영", S.정산금액);
+    if(S.cause) bump(S.cause, S.정산금액);
   }
   const explained = Object.values(causeAgg).reduce((a,c)=>a+c.amount,0);
   const residual = gap - explained;
@@ -718,6 +780,7 @@ function render(res){
   const sc=res.stageCount;
   const unmatchedI=res.inn.filter(r=>!r.matched).length, unmatchedS=res.st.filter(r=>!r.matched).length;
   document.getElementById("stepStats").innerHTML = `
+    <div class="stepbox"><b>0단계</b>예약번호 일치<div class="sc num">${sc[0]}건</div></div>
     <div class="stepbox"><b>1단계</b>이름·금액·날짜 정확<div class="sc num">${sc[1]}건</div></div>
     <div class="stepbox"><b>2단계</b>이름 유사도<div class="sc num">${sc[2]}건</div></div>
     <div class="stepbox"><b>3단계</b>그룹 합산<div class="sc num">${sc[3]}건</div></div>
@@ -738,7 +801,7 @@ function render(res){
   }).join("");
 
   // 원인 목록
-  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","이월가능성","취소수수료","폴리오통합"];
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","정산조정","이월가능성","취소수수료","쿠폰차감","폴리오통합"];
   document.getElementById("causeList").innerHTML = order.filter(k=>res.causeAgg[k]).map(k=>{
     const c=res.causeAgg[k], m=CAUSES[k];
     return `<div class="cause ${m.kind}">
@@ -845,7 +908,7 @@ function exportXlsx(){
     ...R.plats.map(p=>[p.name,p.internal,p.statement,p.gap,p.residual])];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s1), "요약");
 
-  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","이월가능성","취소수수료","폴리오통합"];
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","정산조정","이월가능성","취소수수료","쿠폰차감","폴리오통합"];
   const s2=[["구분","원인","건수","금액","설명"],
     ...order.filter(k=>R.causeAgg[k]).map(k=>[
       CAUSES[k].kind==="a"?"확인 필요":"정상 설명", CAUSE_LABEL[k],
@@ -864,7 +927,7 @@ function exportXlsx(){
 
 function ledgerText(){
   const R=RESULT; if(!R) return "";
-  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","이월가능성","취소수수료","폴리오통합"];
+  const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","정산조정","이월가능성","취소수수료","쿠폰차감","폴리오통합"];
   const L=[];
   L.push("[정산 차액 분석] "+R.period.from+" ~ "+R.period.to+"  ※가상 데이터");
   L.push("내부 "+won(R.internalTotal)+" / 명세서 "+won(R.statementTotal)+" / 차액 "+wonSigned(R.gap));
