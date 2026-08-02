@@ -68,31 +68,70 @@ h1{font-size:70px; font-weight:800; letter-spacing:-.035em; line-height:1.15; ma
 </style>
 </head>
 <body>
-  <div class="bar">⚠️ 가상 데이터 — 데모용으로 만들어낸 예시입니다</div>
+  <div class="bar" id="bar"></div>
   <div class="body">
-    <div class="kicker">정산 차액 분석기</div>
-    <h1>차액이 왜 생겼는지<br>원인별로 찾아냅니다</h1>
-    <p class="sub">플랫폼 정산 명세서와 내부 매출 기록을 대조해<br><b>두 숫자가 다른 이유</b>를 사람 대신 분류합니다</p>
+    <div class="kicker" id="kicker"></div>
+    <h1 id="h1"></h1>
+    <p class="sub" id="sub"></p>
 
     <div class="flow">
-      <div class="box gap">
-        <div class="l">총 차액</div>
-        <div class="v">−609,000원</div>
-        <div class="n">이유를 모르는 상태</div>
+      <div class="box" id="bx1">
+        <div class="l" id="l1"></div>
+        <div class="v" id="v1"></div>
+        <div class="n" id="n1"></div>
       </div>
       <div class="arrow">→</div>
-      <div class="box zero">
-        <div class="l">미설명 잔액</div>
-        <div class="v">0원</div>
-        <div class="n">전액 원인 확정</div>
+      <div class="box" id="bx2">
+        <div class="l" id="l2"></div>
+        <div class="v" id="v2"></div>
+        <div class="n" id="n2"></div>
       </div>
     </div>
 
-    <div class="foot">
-      <span class="chip">5단계 매칭</span>
-      <span class="chip">원인 7종 자동 분류</span>
-      <span class="chip g">데이터 외부 전송 없음</span>
-    </div>
+    <div class="foot" id="foot"></div>
   </div>
+<script>
+var BOX = ["대조 대상","22건","어디가 문제인지 모르는 상태","확인이 필요한 건","7건","나머지는 정상으로 설명됨"];
+var CHIP = ["0-5단계 매칭","원인 10종 자동 분류","데이터 외부 전송 없음"];
+var T = {
+  ota: {
+    kicker:"숙박업 OTA 정산 대사",
+    h1:"차액이 왜 생겼는지<br>원인에 따라 분류합니다",
+    sub:"플랫폼 정산 명세서와 내부 매출 기록을 대조해<br><b>두 숫자가 다른 이유</b>를 찾아냅니다",
+    box:BOX, chip:CHIP
+  },
+  market: {
+    kicker:"오픈마켓 정산 대사",
+    h1:"정산금이 왜 이 금액인지<br>주문 데이터와 대조합니다",
+    sub:"마켓 정산 명세서와 주문 기록을 맞춰보고<br><b>공제된 이유</b>를 항목에 따라 분류합니다",
+    box:["대조 대상","22건","어디서 빠졌는지 모르는 상태","확인이 필요한 건","7건","나머지는 정상으로 설명됨"],
+    chip:CHIP
+  },
+  quote: {
+    kicker:"견적서 자동 생성",
+    h1:"목록을 넣으면<br>계산과 검증까지 끝납니다",
+    sub:"회사 양식 그대로 나오고, 계산값을 <b>원본과 버킷마다 대조</b>합니다<br>요금표 오류나 작성 후 바뀐 예약을 사람보다 먼저 잡습니다",
+    box:["사람 눈으로","전부 맞음","견적 5건 · 라인 9줄","자동 검증","1건 불일치","요금표와 20,000원 차이"],
+    chip:["회사 양식 재현","일자 자동 분해","원본 대조 검증","A4 인쇄 설정"],
+    cls:["","gap"]
+  }
+};
+var BAR_DEMO = "⚠️ 가상 데이터 - 데모용으로 만들어낸 예시입니다";
+T.ota.bar = BAR_DEMO; T.market.bar = BAR_DEMO;
+T.ota.cls = ["gap","zero"]; T.market.cls = ["gap","zero"];
+T.quote.bar = "⚠️ 실제 화면이 아닌 설명을 위한 이미지입니다";
+var t = T[(location.search.match(/type=([a-z]+)/)||[])[1] || "ota"];
+document.getElementById("bar").textContent = t.bar;
+document.getElementById("kicker").textContent = t.kicker;
+document.getElementById("h1").innerHTML = t.h1;
+document.getElementById("sub").innerHTML = t.sub;
+document.getElementById("bx1").className = "box " + (t.cls?t.cls[0]:"gap");
+document.getElementById("bx2").className = "box " + (t.cls?t.cls[1]:"zero");
+var ids=["l1","v1","n1","l2","v2","n2"];
+for (var i=0;i<6;i++) document.getElementById(ids[i]).textContent = t.box[i];
+document.getElementById("foot").innerHTML = t.chip.map(function(c,i){
+  return '<span class="chip'+(i===t.chip.length-1?' g':'')+'">'+c+'</span>';
+}).join("");
+</script>
 </body>
 </html>
