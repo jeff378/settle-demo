@@ -897,11 +897,19 @@ function renderTable(){
 /* ══════════════════════════════════════════════════════════════
    8. 내보내기
    ══════════════════════════════════════════════════════════════ */
+// 지금 화면이 샘플(가상 데이터)인지 판정합니다.
+// 가상 데이터 표식은 샘플일 때만 붙여야 합니다 — 실제 파일을 올렸는데 결과물에
+// "가상 데이터"가 찍히면 그건 거짓말이 되고, 납품본에서는 고객 자료에 그게 박힙니다.
+function isSampleMode(){
+  const b=document.getElementById("virtualBar");
+  return !!b && b.style.display!=="none";
+}
+
 function exportXlsx(){
   const R=RESULT; if(!R) return;
   const wb=XLSX.utils.book_new();
 
-  const s1=[["정산 차액 분석 결과"],["※ 가상 데이터 데모"],[],
+  const s1=[["정산 차액 분석 결과"],...(isSampleMode()?[["※ 가상 데이터 (샘플)"]]:[]),[],
     ["분석 기간", R.period.from+" ~ "+R.period.to],
     ["내부 매출 합계", R.internalTotal],
     ["정산 명세서 합계", R.statementTotal],
@@ -933,7 +941,7 @@ function ledgerText(){
   const R=RESULT; if(!R) return "";
   const order=["오기재","취소처리누락","중복예약오류","매출미반영","이월확인필요","정산조정","이월가능성","취소수수료","쿠폰차감","폴리오통합"];
   const L=[];
-  L.push("[정산 차액 분석] "+R.period.from+" ~ "+R.period.to+"  ※가상 데이터");
+  L.push("[정산 차액 분석] "+R.period.from+" ~ "+R.period.to+(isSampleMode()?"  ※가상 데이터":""));
   L.push("내부 "+won(R.internalTotal)+" / 명세서 "+won(R.statementTotal)+" / 차액 "+wonSigned(R.gap));
   L.push("");
   R.plats.forEach(p=>L.push(p.name+"\t"+p.internal+"\t"+p.statement+"\t"+p.gap+"\t"+p.residual));
